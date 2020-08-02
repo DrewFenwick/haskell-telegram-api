@@ -25,6 +25,16 @@ module Web.Telegram.API.Bot.Data
     , Contact                       (..)
     , Location                      (..)
     , Update                        (..)
+    , UpdateContent                 ( UpdateMessage
+                                    , UpdateEditedMessage
+                                    , UpdateChannelPost
+                                    , UpdateEditedChannelPost
+                                    , UpdateInlineQuery
+                                    , UpdateChosenInlineResult
+                                    , UpdateCallbackQuery
+                                    , UpdateShippingQuery
+                                    , UpdatePreCheckoutQuery
+                                    )
     , File                          (..)
     , UserProfilePhotos             (..)
     , InlineQuery                   (..)
@@ -86,6 +96,7 @@ import qualified Data.Char                    as Char
 import           Data.Int                     (Int64)
 import           Data.List
 import           Data.Text                    (Text)
+import           Control.Applicative (empty)
 import           GHC.Generics
 
 import           Web.Telegram.API.Bot.JsonExt
@@ -786,20 +797,92 @@ instance FromJSON CallbackQuery where
   parseJSON = parseJsonDrop 3
 
 -- | This object represents an incoming update.
--- Only one of the optional parameters can be present in any given update.
 data Update = Update
-  {
-    update_id            :: Int   -- ^ The update's unique identifier. Update identifiers start from a certain positive number and increase sequentially. This ID becomes especially handy if you’re using 'setWebhooks', since it allows you to ignore repeated updates or to restore the correct update sequence, should they get out of order.
-  , message              :: Maybe Message -- ^ New incoming message of any kind — text, photo, sticker, etc.
-  , edited_message       :: Maybe Message -- ^ New version of a message that is known to the bot and was edited
-  , channel_post         :: Maybe Message -- ^ New incoming channel post of any kind — text, photo, sticker, etc.
-  , edited_channel_post  :: Maybe Message -- ^ New version of a channel post that is known to the bot and was edited
-  , inline_query         :: Maybe InlineQuery -- ^ New incoming inline query
-  , chosen_inline_result :: Maybe ChosenInlineResult -- ^ The result of a inline query that was chosen by a user and sent to their chat partner
-  , callback_query       :: Maybe CallbackQuery -- ^ This object represents an incoming callback query from a callback button in an inline keyboard. If the button that originated the query was attached to a message sent by the bot, the field message will be presented. If the button was attached to a message sent via the bot (in inline mode), the field inline_message_id will be presented.
-  , shipping_query       :: Maybe ShippingQuery -- ^  New incoming shipping query. Only for invoices with flexible price
-  , pre_checkout_query   :: Maybe PreCheckoutQuery -- ^ New incoming pre-checkout query. Contains full information about checkout
-  } deriving (FromJSON, ToJSON, Show, Generic)
+  { update_id :: Int  -- ^ The update's unique identifier. Update identifiers start from a certain positive number and increase sequentially. This ID becomes especially handy if you’re using 'setWebhooks', since it allows you to ignore repeated updates or to restore the correct update sequence, should they get out of order.
+  , update_content :: UpdateContent
+  } deriving (Show, Generic)
+
+data UpdateContent -- The unsafe accessors are introduced so that genericToJSON can automatically contruct instances.
+  = UpdateMessage            { unsafe_message              :: Message } -- ^ New incoming message of any kind — text, photo, sticker, etc.
+  | UpdateEditedMessage      { unsafe_edited_message       :: Message } -- ^ New version of a message that is known to the bot and was edited
+  | UpdateChannelPost        { unsafe_channel_post         :: Message } -- ^ New incoming channel post of any kind — text, photo, sticker, etc.
+  | UpdateEditedChannelPost  { unsafe_edited_channel_post  :: Message } -- ^ New version of a channel post that is known to the bot and was edited
+  | UpdateInlineQuery        { unsafe_inline_query         :: InlineQuery } -- ^ New incoming inline query
+  | UpdateChosenInlineResult { unsafe_chosen_inline_result :: ChosenInlineResult} -- ^ The result of a inline query that was chosen by a user and sent to their chat partner
+  | UpdateCallbackQuery      { unsafe_callback_query       :: CallbackQuery } -- ^ This object represents an incoming callback query from a callback button in an inline keyboard. If the 
+  | UpdateShippingQuery      { unsafe_shipping_query       :: ShippingQuery } -- ^  New incoming shipping query. Only for invoices with flexible price
+  | UpdatePreCheckoutQuery   { unsafe_pre_checkout_query   :: PreCheckoutQuery } -- ^ New incoming pre-checkout query. Contains full information about checkout
+  deriving (Show, Generic) 
+
+updateContentToJsonOpts :: Options
+updateContentToJsonOpts = defaultOptions 
+    { fieldLabelModifier = drop 7
+    , sumEncoding = UntaggedValue
+    , omitNothingFields = True
+    }
+
+updateContentFromJsonOpts :: Options
+updateContentFromJsonOpts = updateContentToJsonOpts
+    { fieldLabelModifier = ("unsafe_" ++) }
+
+instance ToJSON UpdateContent where
+  toJSON = genericToJSON updateContentToJsonOpts
+  toEncoding = genericToEncoding updateContentToJsonOpts
+
+instance FromJSON UpdateContent where
+  parseJSON = genericParseJSON updateContentFromJsonOpts
+
+instance ToJSON Update where
+  toJSON u = 
+    let
+      mergeObjects (Object x) (Object y) = Object (x <> y)
+      mergeObjects _          _          = error "mergeObjects recieved a non-object input"
+      contentlessVal = object [("update_id", Number . fromIntegral $ update_id u)]
+      contentVal = toJSON $ update_content u
+    in mergeObjects contentlessVal contentVal
+
+instance FromJSON Update where
+  parseJSON v =
+    withObject "Update" (\o -> Update <$> o .: "update_id" <*> parseJSON v) v
+
+
+-- These functions provide the old interface for accessing update contents.
+-- Pattern matching should be the preferred recommendation to new users.
+message :: Update -> Maybe Message
+message (Update _ (UpdateMessage m)) = pure m
+message _                            = empty
+
+edited_message :: Update -> Maybe Message
+edited_message (Update _ (UpdateEditedMessage m)) = pure m
+edited_message _ = empty
+
+channel_post :: Update -> Maybe Message
+channel_post (Update _ (UpdateChannelPost m)) = pure m
+channel_post _ = empty
+
+edited_channel_post :: Update -> Maybe Message
+edited_channel_post (Update _ (UpdateEditedChannelPost m)) = pure m
+edited_channel_post _ = empty
+
+inline_query :: Update -> Maybe InlineQuery
+inline_query (Update _ (UpdateInlineQuery m)) = pure m
+inline_query _ = empty
+
+chosen_inline_result :: Update -> Maybe ChosenInlineResult
+chosen_inline_result (Update _ (UpdateChosenInlineResult m)) = pure m
+chosen_inline_result _ = empty
+
+callback_query :: Update -> Maybe CallbackQuery
+callback_query (Update _ (UpdateCallbackQuery m)) = pure m
+callback_query _ = empty
+
+shipping_query :: Update -> Maybe ShippingQuery
+shipping_query (Update _ (UpdateShippingQuery m)) = pure m
+shipping_query _ = empty
+
+pre_checkout_query :: Update -> Maybe PreCheckoutQuery
+pre_checkout_query (Update _ (UpdatePreCheckoutQuery m)) = pure m
+pre_checkout_query _ = empty
 
 -- | This object represents a point on the map.
 data Location = Location
